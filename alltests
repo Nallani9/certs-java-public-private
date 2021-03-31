@@ -1,0 +1,211 @@
+package com.hobbyproject.service;
+
+import com.nimbusds.jose.EncryptionMethod;
+import com.nimbusds.jose.JOSEException;
+import com.nimbusds.jose.JWEAlgorithm;
+import com.nimbusds.jose.JWEHeader;
+import com.nimbusds.jose.crypto.RSADecrypter;
+import com.nimbusds.jose.crypto.RSAEncrypter;
+import com.nimbusds.jwt.EncryptedJWT;
+import com.nimbusds.jwt.JWTClaimsSet;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import org.bouncycastle.util.encoders.Base64;
+import org.bouncycastle.util.io.pem.PemObject;
+import org.bouncycastle.util.io.pem.PemReader;
+import org.codehaus.jackson.map.ObjectMapper;
+
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.io.InputStream;
+import java.math.BigInteger;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.security.*;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+import java.security.spec.*;
+import java.text.ParseException;
+import java.util.*;
+
+
+public class Config {
+
+	public static void main(String[] args) throws Exception {
+
+		KeyPairGenerator keyPairGenerator;
+		try {
+			keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+
+			keyPairGenerator.initialize(2048);
+
+			// generate the key pair
+			KeyPair keyPair = keyPairGenerator.genKeyPair();
+
+			// create KeyFactory and RSA Keys Specs
+			KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+			RSAPublicKeySpec publicKeySpec = keyFactory.getKeySpec(keyPair.getPublic(), RSAPublicKeySpec.class);
+			RSAPrivateKeySpec privateKeySpec = keyFactory.getKeySpec(keyPair.getPrivate(), RSAPrivateKeySpec.class);
+
+			// generate (and retrieve) RSA Keys from the KeyFactory using Keys Specs
+			RSAPublicKey publicRsaKey = (RSAPublicKey) keyFactory.generatePublic(publicKeySpec);
+			RSAPrivateKey privateRsaKey  = (RSAPrivateKey) keyFactory.generatePrivate(privateKeySpec);
+
+			System.out.println(publicRsaKey);
+			System.out.println(privateRsaKey);
+
+			JWTClaimsSet.Builder claimsSet = new JWTClaimsSet.Builder();
+			claimsSet.issuer("https://my-auth-server.com");
+			claimsSet.subject("John Kerr");
+			claimsSet.audience(getAudience());
+			claimsSet.expirationTime(new Date(new Date().getTime() + 1000*60*10));
+			claimsSet.notBeforeTime(new Date());
+			claimsSet.jwtID(UUID.randomUUID().toString());
+
+			System.out.println("--------------------------");
+			System.out.println("Claim Set : \n"+claimsSet.build());
+
+			// create the JWT header and specify:
+			//  RSA-OAEP as the encryption algorithm
+			//  128-bit AES/GCM as the encryption method
+			JWEHeader header = new JWEHeader(JWEAlgorithm.RSA_OAEP_256, EncryptionMethod.A256GCM);
+
+			// create the EncryptedJWT object
+			EncryptedJWT jwt = new EncryptedJWT(header, claimsSet.build());
+
+			// create an RSA encrypter with the specified public RSA key
+			RSAEncrypter encrypter = new RSAEncrypter(publicRsaKey);
+
+			// do the actual encryption
+			jwt.encrypt(encrypter);
+
+			// serialize to JWT compact form
+			String jwtString = jwt.serialize();
+			System.out.println("\nJwt Compact Form : "+jwtString);
+
+			// in order to read back the data from the token using your private RSA key:
+			// parse the JWT text string using EncryptedJWT object
+			jwt = EncryptedJWT.parse(jwtString);
+
+			// create a decrypter with the specified private RSA key
+			RSADecrypter decrypter = new RSADecrypter(privateRsaKey);
+
+			// do the decryption
+			jwt.decrypt(decrypter);
+
+			// print out the claims
+
+			System.out.println("===========================================================");
+			System.out.println("Issuer: [ " + jwt.getJWTClaimsSet().getIssuer() + "]");
+			System.out.println("Subject: [" + jwt.getJWTClaimsSet().getSubject()+ "]");
+			System.out.println("Audience size: [" + jwt.getJWTClaimsSet().getAudience().size()+ "]");
+			System.out.println("Expiration Time: [" + jwt.getJWTClaimsSet().getExpirationTime()+ "]");
+			System.out.println("Not Before Time: [" + jwt.getJWTClaimsSet().getNotBeforeTime()+ "]");
+			System.out.println("Issue At: [" + jwt.getJWTClaimsSet().getIssueTime()+ "]");
+			System.out.println("JWT ID: [" + jwt.getJWTClaimsSet().getJWTID()+ "]");
+			System.out.println("===========================================================");
+			InputStream stream = Files.newInputStream(Paths.get("key.pem"));
+			String  abc = new String(stream.readAllBytes(), StandardCharsets.UTF_8);
+			String key = abc.replaceAll("\n", "").replaceAll("\r", "")
+					.replace("-----BEGIN RSA PRIVATE KEY-----", "")
+					.replace("-----END RSA PRIVATE KEY-----","");
+			System.out.println(key);
+			//PrivateKey k = readPrivateKey(key);
+			//System.out.println(k);
+			//getKey(key);
+			//readPrivateKeys(new File("key.pem"));
+			readPrivateKeySecondApproach(new File("key.pem"));
+		} catch (NoSuchAlgorithmException | InvalidKeySpecException | JOSEException | ParseException e) {
+			System.out.println(e.getMessage());
+		}
+	}
+
+	private static List<String> getAudience(){
+		List<String> audience = new ArrayList<>();
+		audience.add("https://my-web-app.com");
+		audience.add("https://your-web-app.com");
+		return audience;
+
+
+	}
+
+
+	public static PublicKey getKey(String key){
+		// Bouncy castle
+		try{
+			byte[] byteKey = Base64.decode(key);
+			org.bouncycastle.asn1.pkcs.RSAPublicKey pkcs1PublicKey = org.bouncycastle.asn1.pkcs.RSAPublicKey.getInstance(byteKey);
+			BigInteger modulus = pkcs1PublicKey.getModulus();
+			BigInteger publicExponent = pkcs1PublicKey.getPublicExponent();
+			RSAPublicKeySpec keySpec = new RSAPublicKeySpec(modulus, publicExponent);
+			KeyFactory kf = KeyFactory.getInstance("RSA");
+			PublicKey generatedPublic = kf.generatePublic(keySpec);
+			System.out.printf("Modulus: %X%n", modulus);
+			System.out.printf("Public exponent: %d ... 17? Why?%n", publicExponent); // 17? OK.
+			System.out.printf("See, Java class result: %s, is RSAPublicKey: %b%n", generatedPublic.getClass().getName(), generatedPublic instanceof RSAPublicKey);
+			return null;
+		}
+		catch(Exception e){
+			e.printStackTrace();
+		}
+
+		return null;
+	}
+	public static PublicKey bigIntegerToPublicKey(BigInteger e, BigInteger m) throws NoSuchAlgorithmException, InvalidKeySpecException {
+		RSAPublicKeySpec keySpec = new RSAPublicKeySpec(m, e);
+		KeyFactory fact = KeyFactory.getInstance("RSA");
+		PublicKey pubKey = fact.generatePublic(keySpec);
+		return pubKey;
+	}
+
+	public static PrivateKey bigIntegerToPrivateKey(BigInteger e, BigInteger m) throws NoSuchAlgorithmException, InvalidKeySpecException {
+		RSAPrivateKeySpec keySpec = new RSAPrivateKeySpec(m, e);
+		KeyFactory fact = KeyFactory.getInstance("RSA");
+		PrivateKey privKey = fact.generatePrivate(keySpec);
+		return privKey;
+	}
+
+	public static RSAPrivateKey readPrivateKey(String key) throws Exception {
+		/*String key = new String(Files.readAllBytes(file.toPath()), Charset.defaultCharset());
+
+		String privateKeyPEM = key
+				.replace("-----BEGIN PRIVATE KEY-----", "")
+				.replaceAll(System.lineSeparator(), "")
+				.replace("-----END PRIVATE KEY-----", "");
+*/
+		byte[] encoded = Base64.decode(key);
+
+		KeyFactory keyFactory = KeyFactory.getInstance("RSA");
+		PKCS8EncodedKeySpec keySpec = new PKCS8EncodedKeySpec(encoded);
+		return (RSAPrivateKey) keyFactory.generatePrivate(keySpec);
+	}
+
+	public static RSAPrivateKey readPrivateKeys(File file) throws Exception {
+		KeyFactory factory = KeyFactory.getInstance("RSA");
+
+		try (FileReader keyReader = new FileReader(file);
+			 PemReader pemReader = new PemReader(keyReader)) {
+
+			PemObject pemObject = pemReader.readPemObject();
+			byte[] content = pemObject.getContent();
+			PKCS8EncodedKeySpec privKeySpec = new PKCS8EncodedKeySpec(content);
+			return (RSAPrivateKey) factory.generatePrivate(privKeySpec);
+		}
+	}
+
+	public static RSAPrivateKey readPrivateKeySecondApproach(File file) throws IOException {
+		try (FileReader keyReader = new FileReader(file)) {
+
+			PEMParser pemParser = new PEMParser(keyReader);
+			JcaPEMKeyConverter converter = new JcaPEMKeyConverter();
+			PrivateKeyInfo privateKeyInfo = PrivateKeyInfo.getInstance(pemParser.readObject());
+
+			return (RSAPrivateKey) converter.getPrivateKey(privateKeyInfo);
+		}
+	}
+
+}
