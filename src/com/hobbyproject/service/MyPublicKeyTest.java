@@ -23,11 +23,11 @@ public class MyPublicKeyTest {
             CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
             FileInputStream fileInputStream = new FileInputStream("request.pem");
             X509Certificate certificate = (X509Certificate) certificateFactory.generateCertificate(fileInputStream);
-            System.out.println(certificate);
+            //System.out.println(certificate);
             System.out.println(certificate.getPublicKey());
             return certificate.getPublicKey();
         }catch (Exception e){
-            System.out.println(e);
+            System.out.println("public key error");
         }
         return null;
     }

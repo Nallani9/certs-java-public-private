@@ -31,7 +31,7 @@ public class MyPrivateKeyTest {
             System.out.println(privateKey);
             return privateKey;
         }catch (Exception e){
-            System.out.println("error");
+            System.out.println("private key error");
         }
         return null;
     }
